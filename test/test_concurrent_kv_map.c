@@ -1,13 +1,13 @@
 #define _GNU_SOURCE
 #include <assert.h>
-#include <concur_kv_map.h>
+#include <concurrent_kv_map.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <inttypes.h>
 
 static const unsigned NUM_ENTRIES = 4096;
 static const unsigned NUM_REMOVE_TESTS = NUM_ENTRIES - 100;
@@ -103,19 +103,25 @@ void test_kv(kv_map *kv, bool single, int rounds) {
     }
     test_println("Checking entry retrieval consistency");
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      const char *str = kv_map_get(kv, entries[i]);
+      char *str = kv_map_get(kv, entries[i]);
       if (!str) {
         test_println("failed retrieve: %s", entries[i]);
       }
       assert(str);
       assert(strcmp(str, entries[(i + off) % NUM_ENTRIES]) == 0);
+      kv_map_val_unref(kv, str);
     }
     test_println("Randomly removing subset of entries");
     for (int i = 0; i < NUM_REMOVE_TESTS; i++) {
       int j;
       do {
         j = better_rand() % NUM_ENTRIES;
-      } while (kv_map_get(kv, entries[j]) == NULL);
+        char *val = kv_map_get(kv, entries[j]);
+        if (val) {
+          kv_map_val_unref(kv, val);
+          break;
+        }
+      } while (1);
       kv_map_unset(kv, entries[j]);
       assert(kv_map_get(kv, entries[j]) == NULL);
     }
@@ -123,20 +129,23 @@ void test_kv(kv_map *kv, bool single, int rounds) {
     // TODO check missing based on iteration with our set of keys
     test_println("Checking entry consistency with num removed");
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      const char *entry = kv_map_get(kv, entries[i]);
+      char *entry = kv_map_get(kv, entries[i]);
       if (entry) {
         assert(strcmp(entry, entries[(i + off) % NUM_ENTRIES]) == 0);
       } else {
         missing_count++;
       }
+      kv_map_val_unref(kv, entry);
     }
     assert(missing_count == NUM_REMOVE_TESTS);
     test_println("Checking specific key insert/remove");
     if (single) {
       kv_map_set(kv, "foo", "bar");
-      assert(strcmp("bar", kv_map_get(kv, "foo")) == 0);
+      KV_MAP_GET_AUTOUNREF(kv, "foo", val,
+                              { assert(strcmp(val, "bar") == 0); });
       kv_map_set(kv, "foo", "baz");
-      assert(strcmp("baz", kv_map_get(kv, "foo")) == 0);
+      KV_MAP_GET_AUTOUNREF(kv, "foo", val,
+                              { assert(strcmp("baz", val) == 0); });
       assert(kv_map_unset(kv, "foo") == true);
       assert(kv_map_unset(kv, "foo") == false);
     }
@@ -163,12 +172,13 @@ void test_kv(kv_map *kv, bool single, int rounds) {
     }
     missing_count = 0;
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      const char *entry = kv_map_get(kv, entries[i]);
-      if (entry) {
-        assert(strcmp(entry, entries[(i + off) % NUM_ENTRIES]) == 0);
-      } else {
-        missing_count++;
-      }
+      KV_MAP_GET_AUTOUNREF(kv, entries[i], entry, {
+        if (entry) {
+          assert(strcmp(entry, entries[(i + off) % NUM_ENTRIES]) == 0);
+        } else {
+          missing_count++;
+        }
+      });
     }
     assert(missing_count == NUM_ENTRIES);
   }
@@ -209,8 +219,9 @@ void *test_kv_continuous_read_thread(void *args) {
     const char *val = kv_map_get(a->kv, (void *)a->key);
     if (val) {
       for (uint64_t i = 0; i < UINT64_MAX; i++) {
-        if(strcmp(val, "foo") != 0 && strcmp(val, "bar") != 0) {
-          test_println("bad value after %"PRIu64" iteration(s): '%s'", i, val);
+        if (strcmp(val, "foo") != 0 && strcmp(val, "bar") != 0) {
+          test_println("bad value after %" PRIu64 " iteration(s): '%s'", i,
+                       val);
           assert(false);
         }
       }
@@ -249,9 +260,9 @@ int main(int argc, char **argv) {
   test_println("running single threaded test");
   test_kv(kv, true, 1);
   test_println("running multi threaded test with no overlapping keys/vals");
-  kv_map_free(kv);
+  kv_map_empty(kv);
   _dump_kv = kv;
-//  signal(SIGABRT, dumptable);
+  //  signal(SIGABRT, dumptable);
   kv_test_thread_args test_thread_args = {
       .kv = kv,
       .rounds = 10,

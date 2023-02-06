@@ -1,13 +1,10 @@
-#ifndef LIBWEBD_KV_MAP_H_
-#define LIBWEBD_KV_MAP_H_
-#define _KV_MAP_H_
+#ifndef _CONCURRENT_KV_MAP_H_
+#define _CONCURRENT_KV_MAP_H_
+//#define REFCNT_TRACE 1
+#include <refcnt.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <refcnt.h>
-
-typedef unsigned long ulong;
-typedef unsigned int uint;
 
 /**
  * Implements a key-value map (hash table). Used for parsed POST and GET
@@ -38,14 +35,13 @@ enum kv_map_error {
 typedef uint_fast32_t kv_map_size;
 typedef uint_fast32_t kv_map_hash;
 
-    /**
-     * Retrieves a human-readable error message for the given error code.
-     * @param error The error code.
-     * @return A human-readable error message.
-     *
-     */
-    const char *
-    kv_map_error_message(enum kv_map_error error);
+/**
+ * Retrieves a human-readable error message for the given error code.
+ * @param error The error code.
+ * @return A human-readable error message.
+ *
+ */
+const char *kv_map_error_message(enum kv_map_error error);
 
 /**
  * Returns a string value of the enumeration identifier
@@ -83,14 +79,14 @@ typedef void (*kv_map_remove_callback)(void *item, void *user_data);
  * @return Pointer to the item that will be returned to the caller
  * @param user_data User data pointer as provided by the creation parameters
  */
-typedef void*(*kv_map_ref_callback)(void *item, void *user_data);
+typedef void *(*kv_map_ref_callback)(void *item, void *user_data);
 
 /**
  * Function pointer for the put hook. This is used for reference counting
  * @param item Pointer to the item in the map that is being put
  * @param user_data User data pointer as provided by the creation parameters
  */
-typedef void*(*kv_map_unref_callback)(void *item, void *user_data);
+typedef void (*kv_map_unref_callback)(void *item, void *user_data);
 
 /**
  * Function pointer type for a hash function which takes the key value
@@ -134,11 +130,14 @@ typedef struct {
   kv_map_remove_callback val_remove_cb;
 
   /// The get hook callback for the key. When NULL, the get hook is disabled
-  kv_map_get_callback key_get_cb;
+  kv_map_ref_callback key_ref_cb;
 
   /// The get hook callback for the value. When NULL, the get hook is disabled
-  kv_map_get_callback val_get_cb;
+  kv_map_ref_callback val_ref_cb;
 
+  kv_map_unref_callback key_unref_cb;
+
+  kv_map_unref_callback val_unref_cb;
 
   /// User data passed into remove/insert hooks
   void *callback_user_data;
@@ -170,7 +169,8 @@ kv_map *kv_map_create(kv_map_create_params create_params);
  * - key_remove_cb = refcnt_unref
  * - val_insert_kb = refcnt_strdup
  * - val_remove_kb = refcnt_unref
- * - val_get_cb = refcnt_ref
+ * - val_ref_cb = refcnt_ref
+ * - key_ref_cb = refcnt_ref
  * - hash_func = fvn1_64 or fvnc1_32 dpeending on fast_int64 size
  *
  *   The use of refcnt is required in order to ensure that concurrent
@@ -208,14 +208,37 @@ void *kv_map_get(kv_map *kv, void *key);
  * @param kv The key value map object handle
  * @param key The key to lookup
  */
-void *kv_map_key_unref(kv_map *kv, void *key);
+void kv_map_key_unref(kv_map *kv, void *key);
 
 /**
  * Unrefs the value associated with the given key. This is only valid if
  * reference counting is enabled. Values are only ref'ed when they are retrieved
  * fro the map with `kv_map_get` or when iterating over the map.
  */
-void *kv_map_val_unref(kv_map *kv, void *val);
+void kv_map_val_unref(kv_map *kv, void *val);
+
+struct _kv_map_cleanup_params {
+  kv_map *__kv;
+  void *__val;
+};
+
+static void __attribute__((unused))
+kv_map_val_cleanup(struct _kv_map_cleanup_params *params) {
+  if (params->__val) {
+    kv_map_val_unref(params->__kv, params->__val);
+  }
+}
+
+#define KV_MAP_GET_AUTOUNREF(kv, key, val, code_block)                         \
+  do {                                                                         \
+    void *val = kv_map_get(kv, key);                                           \
+    struct _kv_map_cleanup_params __attribute((cleanup(kv_map_val_cleanup)))   \
+    __attribute((unused)) __kv_cleanup_params = {                              \
+        .__kv = kv,                                                            \
+        .__val = val,                                                          \
+    };                                                                         \
+    code_block                                                                 \
+  } while (0)
 
 /**
  * Sets a value associated with the given key. If a value is already set for

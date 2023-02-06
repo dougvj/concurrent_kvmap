@@ -3,7 +3,7 @@
 #include "platform.h"
 #include <assert.h>
 #include <inttypes.h>
-#include <concur_kv_map.h>
+#include <concurrent_kv_map.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -181,6 +181,10 @@ kv_map *kv_map_create(kv_map_create_params create_params) {
     kv->key_remove_cb = create_params.key_remove_cb;
     kv->val_insert_cb = create_params.val_insert_cb;
     kv->val_remove_cb = create_params.val_remove_cb;
+    kv->key_ref_cb = create_params.key_ref_cb;
+    kv->val_ref_cb = create_params.val_ref_cb;
+    kv->key_unref_cb = create_params.key_unref_cb;
+    kv->val_unref_cb = create_params.val_unref_cb;
     kv->callback_user_data = create_params.callback_user_data;
     kv->hash_func = create_params.hash_func;
     kv->key_cmp_func = create_params.key_cmp_func;
@@ -200,7 +204,7 @@ static void *_refcnt_strdup_wrap(void *str, void *_) { return refcnt_strdup(str)
 
 static void _refcnt_unref_wrap(void *ptr, void *_) { refcnt_unref(ptr); }
 
-static void* _refcnt_ref_wrap(void *ptr, void *_) { refcnt_ref(ptr); return ptr; }
+static void* _refcnt_ref_wrap(void *ptr, void *_) { return refcnt_ref(ptr); }
 
 
 static void _fputs(void *s, FILE *stream) { fputs(s, stream); }
@@ -257,6 +261,7 @@ static bool _kv_map_move_entry(kv_map *kv, uint_fast32_t old_location,
   old_location_val_moving_marker.val = KV_MOVING_MARKER;
   _kv_entry old_location_val_removed_marker = old_location_val;
   old_location_val_removed_marker.val = null_entry ? NULL : KV_REMOVED_MARKER;
+  old_location_val_removed_marker.key = NULL;
   if (put_kv_entry_atomic(kv, old_location, old_location_val,
                           old_location_val_moving_marker)) {
     if (put_kv_entry_atomic(kv, new_location, new_location_val,
@@ -281,6 +286,20 @@ should_never:
 }
 
 static void *KV_UNINIT = "UNINIT";
+
+#define UNREF_KEY(kv, key)                                                 \
+  do {                                                                     \
+    if (kv->key_unref_cb && key) {                                                \
+      kv->key_unref_cb(key, kv->callback_user_data);                       \
+    }                                                                      \
+  } while (0)
+
+#define REF_KEY(kv, key)                                                   \
+  do {                                                                     \
+    if (kv->key_ref_cb && key) {                                                  \
+      key = kv->key_ref_cb(key, kv->callback_user_data);                         \
+    }                                                                      \
+  } while (0)
 
 // Performs the search for the entry with the given key. The search starts with
 // the hash of the key and then probes until an empty entry is found. An entry
@@ -315,6 +334,8 @@ probe:
       entry = get_kv_entry(kv, index);
       // If we found a NULL, then that means that we are done searching and
       // didn't find our entry
+      void* entry_key = entry.key;
+      REF_KEY(kv, entry_key);
       if (entry.val == NULL) {
 #ifdef ENABLE_DEBUG
         /*if (count > 20) {
@@ -352,7 +373,7 @@ probe:
           optimal_entry = entry;
           optimal_prev = prev;
         }
-      } else if (kv->key_cmp_func(entry.key, key) == 0) {
+      } else if (kv->key_cmp_func(entry_key, key) == 0) {
         // We found our entry. Move to optimal entry if we have one
         if (optimal_index != index && optimal_entry.val != NULL) {
           long jump_size = labs((long)index - (long)optimal_index);
@@ -365,6 +386,7 @@ probe:
           bool null_entry = get_kv_entry(kv, (index + 1) & mask).val == NULL;
           if (_kv_map_move_entry(kv, index, entry, optimal_index, optimal_entry,
                                  null_entry)) {
+            UNREF_KEY(kv, entry_key);
             return (_kv_search_result){.prev = optimal_prev,
                                        // TODO deal with resizable, perhaps
                                        // platform.h and platform.c and remap?
@@ -375,6 +397,7 @@ probe:
           }
           KV_MAP_DEBUG("move failure");
         }
+        UNREF_KEY(kv, entry_key);
         return (_kv_search_result){.prev = prev,
                                    .index = index,
                                    .entry = entry,
@@ -382,6 +405,7 @@ probe:
                                    .mask = mask};
       }
       // Probe next index
+      UNREF_KEY(kv, entry_key);
       index = (index + 1) & mask;
 #ifdef ENABLE_DEBUG
       count++;
@@ -413,6 +437,18 @@ void *kv_map_get(kv_map *kv, void *key) {
         assert(false);
       }
     }
+  }
+}
+
+void kv_map_val_unref(kv_map *kv, void *val) {
+  if (kv->val_unref_cb && val) {
+    kv->val_unref_cb(val, kv->callback_user_data);
+  }
+}
+
+void kv_map_key_unref(kv_map *kv, void *key) {
+  if (kv->key_unref_cb && key) {
+    kv->key_unref_cb(key, kv->callback_user_data);
   }
 }
 
@@ -560,7 +596,7 @@ enum kv_map_error kv_map_set(kv_map *kv, void *key, void *val) {
           KV_MAP_DEBUG("read modify write after original read, freeing key");
           kv->key_remove_cb(cb_key, kv->callback_user_data);
         }
-        KV_MAP_DEBUG("read modify write: %s", (char *)key);
+        //KV_MAP_DEBUG("read modify write: %s", (char *)key);
       } else {
         // If our current entry is empty and the previous entry is valid, check
         // that it has not changed. If it has changed, check that the new value
@@ -607,6 +643,7 @@ bool kv_map_unset(kv_map *kv, void *key) {
       return false;
     } else {
       _kv_entry next = get_kv_entry(kv, (res.index + 1) & kv->mask);
+      to_remove.key = NULL;
       if (next.val != NULL) {
         to_remove.val =
             KV_REMOVED_MARKER; // Marks 'was present' to keep probing intact
@@ -617,8 +654,8 @@ bool kv_map_unset(kv_map *kv, void *key) {
       if (put_kv_entry_atomic(kv, res.index, res.entry, to_remove)) {
         // KV_MAP_DEBUG("%lx: %s\n", (intptr_t)res.entry.val,
         // (char*)res.entry.val);
-        if (kv->key_remove_cb)
-          kv->key_remove_cb(res.entry.key, kv->callback_user_data);
+        /*if (kv->key_remove_cb)
+          kv->key_remove_cb(res.entry.key, kv->callback_user_data);*/
         if (kv->val_remove_cb)
           kv->val_remove_cb(res.entry.val, kv->callback_user_data);
         atomic_fetch_sub(&(kv->count), 1);
