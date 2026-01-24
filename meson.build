@@ -11,7 +11,7 @@ endif
 add_project_arguments('-march=native', language: 'c')
 
 sources = files([
-  './concurrent_kv_map.c',
+  './ckv_map.c',
   './fnv1a_hashes.c'
 ])
 
@@ -19,7 +19,7 @@ refcnt = subproject('refcnt')
 
 includes = ['./', refcnt.get_variable('inc_dirs')]
 
-install_headers(files('./concurrent_kv_map.h'))
+install_headers(files('./ckv_map.h'))
 
 cc = meson.get_compiler('c')
 
@@ -35,13 +35,13 @@ libconcurkvmap = library(
   install: true)
 
 
-test_concurrent_kv_map = executable(
-  'concurrent_kv_test', 'test/test_concurrent_kv_map.c',
+test_ckv_map = executable(
+  'ckv_test', 'test/test_ckv_map.c',
   include_directories: includes,
   link_with: libconcurkvmap,
 )
 
-test('test concurrent kv map', test_concurrent_kv_map)
+test('test ckv map', test_ckv_map)
 
 
 

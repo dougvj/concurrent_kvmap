@@ -1,5 +1,5 @@
-#ifndef _CONCURRENT_KV_MAP_H_
-#define _CONCURRENT_KV_MAP_H_
+#ifndef _CKV_MAP_H_
+#define _CKV_MAP_H_
 //#define REFCNT_TRACE 1
 #include <refcnt.h>
 #include <stdbool.h>
@@ -10,20 +10,20 @@
  * Implements a key-value map (hash table). Used for parsed POST and GET
  * variables as well as for HTTP headers.
  */
-typedef struct kv_map kv_map;
+typedef struct ckv_map ckv_map;
 
-enum kv_map_flags {
-  KV_MAP_FLAGS_NONE,
-  KV_MAP_FLAG_RESIZE_DISABLED = 0x1,
+enum ckv_map_flags {
+  CKV_MAP_FLAGS_NONE,
+  CKV_MAP_FLAG_RESIZE_DISABLED = 0x1,
 };
 
-enum kv_map_error {
-  KV_MAP_ERROR_NONE,
-  KV_MAP_ERROR_OUT_OF_MEMORY,
-  KV_MAP_ERROR_KEY_INSERT_HOOK_FAILED,
-  KV_MAP_ERROR_VAL_INSERT_HOOK_FAILED,
-  KV_MAP_ERROR_FULL,
-  KV_MAP_ERROR_INTERRUPTED,
+enum ckv_map_error {
+  CKV_MAP_ERROR_NONE,
+  CKV_MAP_ERROR_OUT_OF_MEMORY,
+  CKV_MAP_ERROR_KEY_INSERT_HOOK_FAILED,
+  CKV_MAP_ERROR_VAL_INSERT_HOOK_FAILED,
+  CKV_MAP_ERROR_FULL,
+  CKV_MAP_ERROR_INTERRUPTED,
 };
 
 /**
@@ -32,8 +32,8 @@ enum kv_map_error {
  * This should be a 32-bit int on 32-bit platforms and a 64-bit int on 64-bit
  * platforms.
  */
-typedef uint_fast32_t kv_map_size;
-typedef uint_fast32_t kv_map_hash;
+typedef uint_fast32_t ckv_map_size;
+typedef uint_fast32_t ckv_map_hash;
 
 /**
  * Retrieves a human-readable error message for the given error code.
@@ -41,14 +41,14 @@ typedef uint_fast32_t kv_map_hash;
  * @return A human-readable error message.
  *
  */
-const char *kv_map_error_message(enum kv_map_error error);
+const char *ckv_map_error_message(enum ckv_map_error error);
 
 /**
  * Returns a string value of the enumeration identifier
  * @param error The error code.
  * @return A string value of the enumeration identifier.
  */
-const char *kv_map_error_name(enum kv_map_error error);
+const char *ckv_map_error_name(enum ckv_map_error error);
 
 /**
  * Function pointer type for an insertion hook
@@ -62,7 +62,7 @@ const char *kv_map_error_name(enum kv_map_error error);
  * you're inserting a reference counted object into the map, you could
  * provide a wrapper around the reference counting
  */
-typedef void *(*kv_map_insert_callback)(void *item, void *user_data);
+typedef void *(*ckv_map_insert_callback)(void *item, void *user_data);
 
 /**
  * Function pointer type for a removal hook
@@ -71,7 +71,7 @@ typedef void *(*kv_map_insert_callback)(void *item, void *user_data);
  * @examples If you passed a wrapper around strdup for the string, then you
  * would have to pass a wrapper around free here.
  */
-typedef void (*kv_map_remove_callback)(void *item, void *user_data);
+typedef void (*ckv_map_remove_callback)(void *item, void *user_data);
 
 /**
  * Function pointer type for a ref hook. This is used for reference counting
@@ -79,77 +79,77 @@ typedef void (*kv_map_remove_callback)(void *item, void *user_data);
  * @return Pointer to the item that will be returned to the caller
  * @param user_data User data pointer as provided by the creation parameters
  */
-typedef void *(*kv_map_ref_callback)(void *item, void *user_data);
+typedef void *(*ckv_map_ref_callback)(void *item, void *user_data);
 
 /**
  * Function pointer for the put hook. This is used for reference counting
  * @param item Pointer to the item in the map that is being put
  * @param user_data User data pointer as provided by the creation parameters
  */
-typedef void (*kv_map_unref_callback)(void *item, void *user_data);
+typedef void (*ckv_map_unref_callback)(void *item, void *user_data);
 
 /**
  * Function pointer type for a hash function which takes the key value
  */
-typedef kv_map_hash (*kv_map_hash_function)(void *key);
+typedef ckv_map_hash (*ckv_map_hash_function)(void *key);
 
 /**
  * Function pointer type for comparing two key values. Follows the same
  * semantics as strcmp, where 0 is equality.
  */
-typedef int (*kv_map_key_cmp_func)(void *key_a, void *key_b);
+typedef int (*ckv_map_key_cmp_func)(void *key_a, void *key_b);
 
 /**
  * Function pointer type for printing a key or value.
  * @param stream THe file stream to print to
  * @param void* item The item to print
  */
-typedef void (*kv_map_print_func)(void *item, FILE *stream);
+typedef void (*ckv_map_print_func)(void *item, FILE *stream);
 
 /**
  * A set of creation parameters for the kv map.
  */
 typedef struct {
   /// The initial size of the map. The size must be a power of two
-  kv_map_size size;
+  ckv_map_size size;
   /**
    * Creation flags controlling behavior. Right now the only creation flag that
    * can be specified is whether resize on the map is enabled
    */
-  enum kv_map_flags flags;
+  enum ckv_map_flags flags;
   /// The insert hook call. When NULL, the insertion hook is disabled
-  kv_map_insert_callback key_insert_cb;
+  ckv_map_insert_callback key_insert_cb;
   /// The remove hook callback for the key. When NULL, the remove hook is
   /// disabled
-  kv_map_remove_callback key_remove_cb;
+  ckv_map_remove_callback key_remove_cb;
   /// THe insert hook callback for the value. When NULL, the insertion hook is
   /// disabled
-  kv_map_insert_callback val_insert_cb;
+  ckv_map_insert_callback val_insert_cb;
   /// The remove hook callback for the value. When NULL, the iremoval hook is
   /// disabled
-  kv_map_remove_callback val_remove_cb;
+  ckv_map_remove_callback val_remove_cb;
 
   /// The get hook callback for the key. When NULL, the get hook is disabled
-  kv_map_ref_callback key_ref_cb;
+  ckv_map_ref_callback key_ref_cb;
 
   /// The get hook callback for the value. When NULL, the get hook is disabled
-  kv_map_ref_callback val_ref_cb;
+  ckv_map_ref_callback val_ref_cb;
 
-  kv_map_unref_callback key_unref_cb;
+  ckv_map_unref_callback key_unref_cb;
 
-  kv_map_unref_callback val_unref_cb;
+  ckv_map_unref_callback val_unref_cb;
 
   /// User data passed into remove/insert hooks
   void *callback_user_data;
   /// The hash function for the key value
-  kv_map_hash_function hash_func;
+  ckv_map_hash_function hash_func;
   /// The compare function for the key values
-  kv_map_key_cmp_func key_cmp_func;
+  ckv_map_key_cmp_func key_cmp_func;
   /// The function for printing the key
-  kv_map_print_func key_print_func;
+  ckv_map_print_func key_print_func;
   /// The function for printing the value
-  kv_map_print_func val_print_func;
-} kv_map_create_params;
+  ckv_map_print_func val_print_func;
+} ckv_map_create_params;
 
 /**
  * Creates a new key value map with the specified parameters
@@ -157,13 +157,13 @@ typedef struct {
  * @return A new handle to a key value map. `NULL` on allocation failure or
  * invalid parameter (such as non-power of two initial size)
  */
-kv_map *kv_map_create(kv_map_create_params create_params);
+ckv_map *ckv_map_create(ckv_map_create_params create_params);
 
 /**
  * Creates a new key value mapping strings to strings
  *
- * This function is the equivalent of calling `kv_map_create2`
- * with the following wrapper parameters set in kv_map_create_params:
+ * This function is the equivalent of calling `ckv_map_create2`
+ * with the following wrapper parameters set in ckv_map_create_params:
  *
  * - key_insert_kb = refcnt_strdup
  * - key_remove_cb = refcnt_unref
@@ -181,14 +181,14 @@ kv_map *kv_map_create(kv_map_create_params create_params);
  *
  * @return A new handle to a key value map. `NULL` on allocation failure
  */
-kv_map *kv_map_str_create(kv_map_size initial_size);
+ckv_map *ckv_map_str_create(ckv_map_size initial_size);
 
 /**
  * Dumps a table in to a file for debugging purposes
  *
  * TODO only works with string key/vals right now
  */
-void kv_map_debug_dump_table(kv_map *kv, FILE *f);
+void ckv_map_debug_dump_table(ckv_map *kv, FILE *f);
 
 /**
  * Returns the value associated with the given key. If reference counting is
@@ -199,7 +199,7 @@ void kv_map_debug_dump_table(kv_map *kv, FILE *f);
  * @param key The key to lookup
  * @return The value associated with the key, or NULL of no value exists
  */
-void *kv_map_get(kv_map *kv, void *key);
+void *ckv_map_get(ckv_map *kv, void *key);
 
 /**
  * Unrefs a handle to the key. This is only valid if
@@ -208,32 +208,32 @@ void *kv_map_get(kv_map *kv, void *key);
  * @param kv The key value map object handle
  * @param key The key to lookup
  */
-void kv_map_key_unref(kv_map *kv, void *key);
+void ckv_map_key_unref(ckv_map *kv, void *key);
 
 /**
  * Unrefs the value associated with the given key. This is only valid if
  * reference counting is enabled. Values are only ref'ed when they are retrieved
- * fro the map with `kv_map_get` or when iterating over the map.
+ * fro the map with `ckv_map_get` or when iterating over the map.
  */
-void kv_map_val_unref(kv_map *kv, void *val);
+void ckv_map_val_unref(ckv_map *kv, void *val);
 
-struct _kv_map_cleanup_params {
-  kv_map *__kv;
+struct _ckv_map_cleanup_params {
+  ckv_map *__kv;
   void *__val;
 };
 
 static void __attribute__((unused))
-kv_map_val_cleanup(struct _kv_map_cleanup_params *params) {
+ckv_map_val_cleanup(struct _ckv_map_cleanup_params *params) {
   if (params->__val) {
-    kv_map_val_unref(params->__kv, params->__val);
+    ckv_map_val_unref(params->__kv, params->__val);
   }
 }
 
-#define KV_MAP_GET_AUTOUNREF(kv, key, val, code_block)                         \
+#define CKV_MAP_GET_AUTOUNREF(kv, key, val, code_block)                         \
   do {                                                                         \
-    void *val = kv_map_get(kv, key);                                           \
-    struct _kv_map_cleanup_params __attribute((cleanup(kv_map_val_cleanup)))   \
-    __attribute((unused)) __kv_cleanup_params = {                              \
+    void *val = ckv_map_get(kv, key);                                           \
+    struct _ckv_map_cleanup_params __attribute((cleanup(ckv_map_val_cleanup)))   \
+    __attribute((unused)) __ckv_cleanup_params = {                              \
         .__kv = kv,                                                            \
         .__val = val,                                                          \
     };                                                                         \
@@ -250,7 +250,7 @@ kv_map_val_cleanup(struct _kv_map_cleanup_params *params) {
  * @return True on success, false on failure. Failure conditions include malloc
  * failure or table is full and resize is disabled
  */
-enum kv_map_error kv_map_set(kv_map *kv, void *key, void *val);
+enum ckv_map_error ckv_map_set(ckv_map *kv, void *key, void *val);
 
 /**
  * Clears a value associated with the given key
@@ -259,7 +259,7 @@ enum kv_map_error kv_map_set(kv_map *kv, void *key, void *val);
  * @param key The key whose associated value is removed
  * @return True on sucess, false if the key is not found
  */
-bool kv_map_unset(kv_map *kv, void *key);
+bool ckv_map_unset(ckv_map *kv, void *key);
 
 /**
  * Atomically sets a value associated with the given key. If a key does not
@@ -280,7 +280,7 @@ bool kv_map_unset(kv_map *kv, void *key);
  * @return Error status code indicating success or failure
  *
  */
-enum kv_map_error kv_map_set_atomic(kv_map *kv, void *key, void *old_val,
+enum ckv_map_error ckv_map_set_atomic(ckv_map *kv, void *key, void *old_val,
                                     void *val);
 
 /**
@@ -289,18 +289,18 @@ enum kv_map_error kv_map_set_atomic(kv_map *kv, void *key, void *old_val,
  * @param kv The key value map object handle
  * @return The number of items in the map
  */
-int kv_map_count(kv_map *kv);
+int ckv_map_count(ckv_map *kv);
 
 /**
- * A callback called for every key in the map using `kv_map_iterate`
+ * A callback called for every key in the map using `ckv_map_iterate`
  *
  * @param key The key
  * @param val The value
- * @param data The data parameter passed in `kv_map_iterate`
+ * @param data The data parameter passed in `ckv_map_iterate`
  * @return The callback must return true to continue iteration or false if the
  *  iteration should be aborted
  */
-typedef bool (*kv_map_iterate_callback)(void *key, void *val, void *data);
+typedef bool (*ckv_map_iterate_callback)(void *key, void *val, void *data);
 /**
  * Iterate through all key value pairs in the map
  *
@@ -312,15 +312,15 @@ typedef bool (*kv_map_iterate_callback)(void *key, void *val, void *data);
  * @return true if the iteration completed, false if it was aborted by a
  *  callback function call
  */
-bool kv_map_iterate(kv_map *kv, kv_map_iterate_callback callback, void *data);
+bool ckv_map_iterate(ckv_map *kv, ckv_map_iterate_callback callback, void *data);
 
 /**
  * Prints the kv map in something that looks kinda like JSON (depending on what
- * value of `kv_map_print_func` is set to).
+ * value of `ckv_map_print_func` is set to).
  *
  * May be actually JSON compatible but no rigorous attempt is made
  */
-void kv_map_print(kv_map *kv, FILE *fp);
+void ckv_map_print(ckv_map *kv, FILE *fp);
 
 /**
  * Empties the kv map without freeing underlying backing memory for the table.
@@ -329,11 +329,11 @@ void kv_map_print(kv_map *kv, FILE *fp);
  * Note that remove hooks are still called for keys and values which may still
  * free resources
  */
-void kv_map_empty(kv_map *kv);
+void ckv_map_empty(ckv_map *kv);
 
 /**
  * Frees the key value map object and deallocates all resources
  */
-void kv_map_free(kv_map *kv);
+void ckv_map_free(ckv_map *kv);
 
 #endif

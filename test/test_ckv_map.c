@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 #include <assert.h>
-#include <concurrent_kv_map.h>
+#include <ckv_map.h>
 #include <inttypes.h>
 #include <pthread.h>
 #include <signal.h>
@@ -54,7 +54,7 @@ bool iterate_with_abort(const char *key, const char *val, void *data) {
   return true;
 }
 
-static kv_map *_dump_kv = NULL;
+static ckv_map *_dump_kv = NULL;
 static pthread_t threads[NUM_THREADS];
 
 void dumptable(int signum) {
@@ -68,14 +68,14 @@ void dumptable(int signum) {
     }
     fprintf(stderr, "Dumping table\n");
     FILE *f = fopen("kv_dump.csv", "w");
-    kv_map_debug_dump_table(_dump_kv, f);
+    ckv_map_debug_dump_table(_dump_kv, f);
     fprintf(stderr, "Done dumping table\n");
     fclose(f);
   }
   abort();
 }
 
-void test_kv(kv_map *kv, bool single, int rounds) {
+void test_kv(ckv_map *kv, bool single, int rounds) {
   test_println("generating random entries");
   // dynamically allocated list of strings
   char(*entries)[MAX_LEN];
@@ -93,86 +93,86 @@ void test_kv(kv_map *kv, bool single, int rounds) {
     test_println("inserting entries into map");
     // Deterministically associate keys and values
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      assert(kv_map_set(kv, entries[i], entries[(i + off) % NUM_ENTRIES]) ==
-             KV_MAP_ERROR_NONE);
+      assert(ckv_map_set(kv, entries[i], entries[(i + off) % NUM_ENTRIES]) ==
+             CKV_MAP_ERROR_NONE);
     }
     //
     if (single) {
-      test_println("%i, %i", kv_map_count(kv), NUM_ENTRIES);
-      assert(kv_map_count(kv) == NUM_ENTRIES);
+      test_println("%i, %i", ckv_map_count(kv), NUM_ENTRIES);
+      assert(ckv_map_count(kv) == NUM_ENTRIES);
     }
     test_println("Checking entry retrieval consistency");
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      char *str = kv_map_get(kv, entries[i]);
+      char *str = ckv_map_get(kv, entries[i]);
       if (!str) {
         test_println("failed retrieve: %s", entries[i]);
       }
       assert(str);
       assert(strcmp(str, entries[(i + off) % NUM_ENTRIES]) == 0);
-      kv_map_val_unref(kv, str);
+      ckv_map_val_unref(kv, str);
     }
     test_println("Randomly removing subset of entries");
     for (int i = 0; i < NUM_REMOVE_TESTS; i++) {
       int j;
       do {
         j = better_rand() % NUM_ENTRIES;
-        char *val = kv_map_get(kv, entries[j]);
+        char *val = ckv_map_get(kv, entries[j]);
         if (val) {
-          kv_map_val_unref(kv, val);
+          ckv_map_val_unref(kv, val);
           break;
         }
       } while (1);
-      kv_map_unset(kv, entries[j]);
-      assert(kv_map_get(kv, entries[j]) == NULL);
+      ckv_map_unset(kv, entries[j]);
+      assert(ckv_map_get(kv, entries[j]) == NULL);
     }
     int missing_count = 0;
     // TODO check missing based on iteration with our set of keys
     test_println("Checking entry consistency with num removed");
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      char *entry = kv_map_get(kv, entries[i]);
+      char *entry = ckv_map_get(kv, entries[i]);
       if (entry) {
         assert(strcmp(entry, entries[(i + off) % NUM_ENTRIES]) == 0);
       } else {
         missing_count++;
       }
-      kv_map_val_unref(kv, entry);
+      ckv_map_val_unref(kv, entry);
     }
     assert(missing_count == NUM_REMOVE_TESTS);
     test_println("Checking specific key insert/remove");
     if (single) {
-      kv_map_set(kv, "foo", "bar");
-      KV_MAP_GET_AUTOUNREF(kv, "foo", val,
+      ckv_map_set(kv, "foo", "bar");
+      CKV_MAP_GET_AUTOUNREF(kv, "foo", val,
                               { assert(strcmp(val, "bar") == 0); });
-      kv_map_set(kv, "foo", "baz");
-      KV_MAP_GET_AUTOUNREF(kv, "foo", val,
+      ckv_map_set(kv, "foo", "baz");
+      CKV_MAP_GET_AUTOUNREF(kv, "foo", val,
                               { assert(strcmp("baz", val) == 0); });
-      assert(kv_map_unset(kv, "foo") == true);
-      assert(kv_map_unset(kv, "foo") == false);
+      assert(ckv_map_unset(kv, "foo") == true);
+      assert(ckv_map_unset(kv, "foo") == false);
     }
     int count = 0;
     test_println("Checking iteration is consistent");
-    kv_map_iterate(kv, (kv_map_iterate_callback)iterate, &count);
+    ckv_map_iterate(kv, (ckv_map_iterate_callback)iterate, &count);
     if (single) {
-      test_println("%i, %i, %i", kv_map_count(kv), count,
+      test_println("%i, %i, %i", ckv_map_count(kv), count,
                    NUM_ENTRIES - NUM_REMOVE_TESTS);
       assert(count == NUM_ENTRIES - NUM_REMOVE_TESTS);
-      assert(kv_map_count(kv) == NUM_ENTRIES - NUM_REMOVE_TESTS);
+      assert(ckv_map_count(kv) == NUM_ENTRIES - NUM_REMOVE_TESTS);
     }
     count = 0;
-    kv_map_iterate(kv, (kv_map_iterate_callback)iterate_with_abort, &count);
+    ckv_map_iterate(kv, (ckv_map_iterate_callback)iterate_with_abort, &count);
     assert(count == 10);
     test_println("Checking all removal makes sense");
     if (single) {
-      kv_map_empty(kv);
-      assert(kv_map_count(kv) == 0);
+      ckv_map_empty(kv);
+      assert(ckv_map_count(kv) == 0);
     } else {
       for (int i = 0; i < NUM_ENTRIES; i++) {
-        kv_map_unset(kv, entries[i]);
+        ckv_map_unset(kv, entries[i]);
       }
     }
     missing_count = 0;
     for (int i = 0; i < NUM_ENTRIES; i++) {
-      KV_MAP_GET_AUTOUNREF(kv, entries[i], entry, {
+      CKV_MAP_GET_AUTOUNREF(kv, entries[i], entry, {
         if (entry) {
           assert(strcmp(entry, entries[(i + off) % NUM_ENTRIES]) == 0);
         } else {
@@ -188,11 +188,11 @@ void test_kv(kv_map *kv, bool single, int rounds) {
 #include <unistd.h>
 
 typedef struct {
-  kv_map *kv;
+  ckv_map *kv;
   int rounds;
 } kv_test_thread_args;
 
-void *test_kv_thread_start(void *args) {
+void *test_ckv_thread_start(void *args) {
   kv_test_thread_args *a = (kv_test_thread_args *)args;
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   thread_id = cur_thread_num++;
@@ -206,17 +206,17 @@ void *test_kv_thread_start(void *args) {
 }
 
 typedef struct {
-  kv_map *kv;
+  ckv_map *kv;
   const char *key;
 } kv_test_thread_continuous_args;
 
-void *test_kv_continuous_read_thread(void *args) {
+void *test_ckv_continuous_read_thread(void *args) {
   kv_test_thread_continuous_args *a = (kv_test_thread_continuous_args *)args;
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   pthread_setname_np(pthread_self(), "kv_continuous_read_thread");
   const char *last_val = NULL;
   for (;;) {
-    const char *val = kv_map_get(a->kv, (void *)a->key);
+    const char *val = ckv_map_get(a->kv, (void *)a->key);
     if (val) {
       for (uint64_t i = 0; i < UINT64_MAX; i++) {
         if (strcmp(val, "foo") != 0 && strcmp(val, "bar") != 0) {
@@ -235,13 +235,13 @@ void *test_kv_continuous_read_thread(void *args) {
   return NULL;
 }
 
-void *test_kv_continuous_modify_thread(void *args) {
+void *test_ckv_continuous_modify_thread(void *args) {
   kv_test_thread_continuous_args *a = (kv_test_thread_continuous_args *)args;
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   pthread_setname_np(pthread_self(), "kv_continuous_modify_thread");
   for (;;) {
-    kv_map_set(a->kv, (void *)a->key, "foo");
-    kv_map_set(a->kv, (void *)a->key, "bar");
+    ckv_map_set(a->kv, (void *)a->key, "foo");
+    ckv_map_set(a->kv, (void *)a->key, "bar");
   }
   return NULL;
 }
@@ -255,12 +255,12 @@ int main(int argc, char **argv) {
   srand48_r(seed, &thread_seed);
   test_println("using seed %u\n", seed);
   test_println("testing creation\n");
-  kv_map *kv = kv_map_str_create(0);
+  ckv_map *kv = ckv_map_str_create(0);
   assert(kv != NULL);
   test_println("running single threaded test");
   test_kv(kv, true, 1);
   test_println("running multi threaded test with no overlapping keys/vals");
-  kv_map_empty(kv);
+  ckv_map_empty(kv);
   _dump_kv = kv;
   //  signal(SIGABRT, dumptable);
   kv_test_thread_args test_thread_args = {
@@ -268,7 +268,7 @@ int main(int argc, char **argv) {
       .rounds = 10,
   };
   for (int i = 0; i < NUM_THREADS; i++) {
-    pthread_create(&(threads[i]), NULL, test_kv_thread_start,
+    pthread_create(&(threads[i]), NULL, test_ckv_thread_start,
                    &test_thread_args);
   }
   kv_test_thread_continuous_args test_thread_continuous_args = {
@@ -276,10 +276,10 @@ int main(int argc, char **argv) {
       .key = "dontcare!",
   };
   pthread_t continuous_read_thread, continuous_modify_thread;
-  pthread_create(&continuous_read_thread, NULL, test_kv_continuous_read_thread,
+  pthread_create(&continuous_read_thread, NULL, test_ckv_continuous_read_thread,
                  &test_thread_continuous_args);
   pthread_create(&continuous_modify_thread, NULL,
-                 test_kv_continuous_modify_thread,
+                 test_ckv_continuous_modify_thread,
                  &test_thread_continuous_args);
   for (int i = 0; i < NUM_THREADS; i++) {
     pthread_join(threads[i], NULL);
@@ -288,24 +288,24 @@ int main(int argc, char **argv) {
   pthread_cancel(continuous_modify_thread);
   pthread_join(continuous_read_thread, NULL);
   pthread_join(continuous_modify_thread, NULL);
-  kv_map_free(kv);
+  ckv_map_free(kv);
   test_println("checking generic map creation\n");
-  kv = kv_map_create((kv_map_create_params){
+  kv = ckv_map_create((ckv_map_create_params){
       .size = 100,
   });
   assert(kv == NULL);
   // Require hash_func and key_cmp_func
-  kv = kv_map_create((kv_map_create_params){.size = 0});
+  kv = ckv_map_create((ckv_map_create_params){.size = 0});
   assert(kv == NULL);
-  kv = kv_map_str_create(0);
-  kv_map_set(kv, "foo", "bar");
+  kv = ckv_map_str_create(0);
+  ckv_map_set(kv, "foo", "bar");
   char *str_rep;
   size_t str_size;
   FILE *f = open_memstream(&str_rep, &str_size);
-  kv_map_print(kv, f);
+  ckv_map_print(kv, f);
   fclose(f);
   assert(strcmp(str_rep, "{\n\t\"foo\": \"bar\"\n}\n") == 0);
   free(str_rep);
-  kv_map_free(kv);
+  ckv_map_free(kv);
   return 0;
 }
