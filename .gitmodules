@@ -1,0 +1,3 @@
+[submodule "subprojects/refcnt"]
+	path = subprojects/refcnt
+	url = https://github.com/dougvj/refcnt
