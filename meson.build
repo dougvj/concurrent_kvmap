@@ -27,8 +27,8 @@ atomic = cc.find_library('atomic')
 
 
 
-libconcurkvmap = library(
-  'libconcurrentkvmap',
+libckvmap = library(
+  'libckvmap',
   sources,
   dependencies: [atomic],
   include_directories: includes,
@@ -38,7 +38,7 @@ libconcurkvmap = library(
 test_ckv_map = executable(
   'ckv_test', 'test/test_ckv_map.c',
   include_directories: includes,
-  link_with: libconcurkvmap,
+  link_with: libckvmap,
 )
 
 test('test ckv map', test_ckv_map)
