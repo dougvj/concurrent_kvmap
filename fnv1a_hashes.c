@@ -1,4 +1,4 @@
-#include <fnv1a_hashes.h>
+#include "fnv1a_hashes.h"
 
 uint64_t fnv1a_hash64(const char* str) {
   static const uint64_t BASIS = 14695981039346656037ull;
@@ -12,8 +12,8 @@ uint64_t fnv1a_hash64(const char* str) {
 }
 
 uint32_t fnv1a_hash32(const char* str) {
-  static const uint64_t BASIS = 2166136261ul;
-  static const uint64_t FNV_PRIME = 16777619ull;
+  static const uint32_t BASIS = 2166136261ul;
+  static const uint32_t FNV_PRIME = 16777619ul;
   uint32_t hash = BASIS;
   for (const char* c = str; *c != '\0'; c++) {
     hash = hash ^ *c;

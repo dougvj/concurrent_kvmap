@@ -3,7 +3,7 @@
 #include "platform.h"
 #include <assert.h>
 #include <inttypes.h>
-#include <concurrent_kv_map.h>
+#include "concurrent_kv_map.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -100,7 +100,7 @@ static void _kv_release_table_ref(kv_map *kv) {
 }
 
 // Pull kv entry from table
-static _kv_entry get_kv_entry(kv_map *kv, int index) {
+static _kv_entry get_kv_entry(kv_map *kv, _kv_index index) {
   _kv_int_ptr_entry *table = _kv_acquire_table_ref(kv);
   _kv_entry ret = (_kv_entry){.intval = table[index]};
   _kv_release_table_ref(kv);
@@ -113,7 +113,7 @@ static bool _kv_val_empty(void *val) {
 
 // Commit kv entry, if another thread already committed it then this returns
 // false and the callee needs to retry
-static bool put_kv_entry_atomic(kv_map *kv, int index, _kv_entry old_val,
+static bool put_kv_entry_atomic(kv_map *kv, _kv_index index, _kv_entry old_val,
                                 _kv_entry new_val) {
   _kv_int_ptr_entry *table = _kv_acquire_table_ref(kv);
   assert(new_val.key != NULL || _kv_val_empty(new_val.val));
@@ -152,12 +152,17 @@ const char *kv_map_error_name(enum kv_map_error error) {
 }
 
 kv_map *kv_map_create(kv_map_create_params create_params) {
+  // Require hash and comparison functions
+  if (!create_params.hash_func || !create_params.key_cmp_func) {
+    KV_MAP_DEBUG("hash_func and key_cmp_func are required");
+    return NULL;
+  }
   uint_fast32_t size = create_params.size;
   if (!size) {
     size = 32;
   } else {
     int bitcount = 0;
-    for (int i = 0; i < sizeof(int) * 8; i++) {
+    for (size_t i = 0; i < sizeof(kv_map_size) * 8; i++) {
       if ((size >> i & 1) == 1) {
         bitcount++;
       }
@@ -200,11 +205,20 @@ kv_map *kv_map_create(kv_map_create_params create_params) {
   return kv;
 }
 
-static void *_refcnt_strdup_wrap(void *str, void *_) { return refcnt_strdup(str); }
+static void *_refcnt_strdup_wrap(void *str, void *user_data) {
+  (void)user_data;
+  return refcnt_strdup(str);
+}
 
-static void _refcnt_unref_wrap(void *ptr, void *_) { refcnt_unref(ptr); }
+static void _refcnt_unref_wrap(void *ptr, void *user_data) {
+  (void)user_data;
+  refcnt_unref(ptr);
+}
 
-static void* _refcnt_ref_wrap(void *ptr, void *_) { return refcnt_ref(ptr); }
+static void *_refcnt_ref_wrap(void *ptr, void *user_data) {
+  (void)user_data;
+  return refcnt_ref(ptr);
+}
 
 
 static void _fputs(void *s, FILE *stream) { fputs(s, stream); }
@@ -701,17 +715,30 @@ bool kv_map_iterate(kv_map *kv, kv_map_iterate_callback callback, void *data) {
 
 void kv_map_print(kv_map *kv, FILE *fp) {
   fputs("{\n", fp);
+  bool comma = false;
   for (_kv_index i = 0; i <= kv->mask; i++) {
     _kv_entry entry = get_kv_entry(kv, i);
     if (entry.key) {
-      fputs("\t", fp);
-      kv->key_print_func(entry.key, fp);
-      fputs(": ", fp);
-      kv->val_print_func(entry.val, fp);
-      fputs("\n", fp);
+      if (comma) {
+        fputs(",\n", fp);
+      }
+      fputs("\t\"", fp);
+      if (kv->key_print_func) {
+        kv->key_print_func(entry.key, fp);
+      } else {
+        fprintf(fp, "<ptr:%p>", entry.key);
+      }
+      fputs("\": \"", fp);
+      if (kv->val_print_func) {
+        kv->val_print_func(entry.val, fp);
+      } else {
+        fprintf(fp, "<ptr:%p>", entry.val);
+      }
+      fputs("\"", fp);
+      comma = true;
     }
   }
-  fputs("}\n", fp);
+  fputs("\n}\n", fp);
 }
 
 void kv_map_empty(kv_map *kv) {

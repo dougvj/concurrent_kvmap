@@ -294,10 +294,9 @@ int main(int argc, char **argv) {
       .size = 100,
   });
   assert(kv == NULL);
-  // We need sensible defaults (IE, resizable, etc)
-  kv = kv_map_create((kv_map_create_params){});
-  assert(kv);
-  kv_map_free(kv);
+  // Require hash_func and key_cmp_func
+  kv = kv_map_create((kv_map_create_params){.size = 0});
+  assert(kv == NULL);
   kv = kv_map_str_create(0);
   kv_map_set(kv, "foo", "bar");
   char *str_rep;
@@ -305,7 +304,7 @@ int main(int argc, char **argv) {
   FILE *f = open_memstream(&str_rep, &str_size);
   kv_map_print(kv, f);
   fclose(f);
-  assert(strcmp(str_rep, "{\n\tfoo: bar\n}\n") == 0);
+  assert(strcmp(str_rep, "{\n\t\"foo\": \"bar\"\n}\n") == 0);
   free(str_rep);
   kv_map_free(kv);
   return 0;
