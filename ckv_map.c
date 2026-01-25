@@ -54,6 +54,13 @@ typedef struct {
   _ckv_index mask;
 } _ckv_search_result;
 
+// Retired item node for deferred freeing
+typedef struct _ckv_retired_item {
+  struct _ckv_retired_item *next;
+  void *ptr;
+  bool is_key;  // true = use key_remove_cb, false = use val_remove_cb
+} _ckv_retired_item;
+
 struct ckv_map {
   _ckv_atomic_index count;
   _ckv_index
@@ -62,6 +69,7 @@ struct ckv_map {
   _ckv_int_ptr_entry *_Atomic table;
   _Atomic bool is_resizing;
   atomic_int table_refs;
+  _Atomic(_ckv_retired_item *) retired_head;  // Lock-free stack of retired items
   ckv_map_insert_callback key_insert_cb;
   ckv_map_remove_callback key_remove_cb;
   ckv_map_insert_callback val_insert_cb;
@@ -77,6 +85,40 @@ struct ckv_map {
   ckv_map_print_func val_print_func;
   enum ckv_map_flags flags;
 };
+
+// Push an item to the retired list (lock-free Treiber stack)
+static void _ckv_retire_item(ckv_map *kv, void *ptr, bool is_key) {
+  if (!ptr) return;
+  _ckv_retired_item *item = malloc(sizeof(_ckv_retired_item));
+  if (!item) return;  // Best effort - leak on OOM
+  item->ptr = ptr;
+  item->is_key = is_key;
+  _ckv_retired_item *old_head;
+  do {
+    old_head = atomic_load(&kv->retired_head);
+    item->next = old_head;
+  } while (!atomic_compare_exchange_weak(&kv->retired_head, &old_head, item));
+}
+
+// Drain and free all retired items (call when no threads are accessing)
+static void _ckv_drain_retired(ckv_map *kv) {
+  // Atomically take the entire list
+  _ckv_retired_item *head = atomic_exchange(&kv->retired_head, NULL);
+  while (head) {
+    _ckv_retired_item *next = head->next;
+    if (head->is_key) {
+      if (kv->key_remove_cb) {
+        kv->key_remove_cb(head->ptr, kv->callback_user_data);
+      }
+    } else {
+      if (kv->val_remove_cb) {
+        kv->val_remove_cb(head->ptr, kv->callback_user_data);
+      }
+    }
+    free(head);
+    head = next;
+  }
+}
 
 static _ckv_int_ptr_entry *_ckv_acquire_table_ref(ckv_map *kv) {
   _ckv_int_ptr_entry *table;
@@ -182,6 +224,7 @@ ckv_map *ckv_map_create(ckv_map_create_params create_params) {
     kv->count = 0;
     kv->mask = size - 1;
     kv->is_resizing = false;
+    kv->retired_head = NULL;
     kv->key_insert_cb = create_params.key_insert_cb;
     kv->key_remove_cb = create_params.key_remove_cb;
     kv->val_insert_cb = create_params.val_insert_cb;
@@ -387,7 +430,7 @@ probe:
           optimal_entry = entry;
           optimal_prev = prev;
         }
-      } else if (kv->key_cmp_func(entry_key, key) == 0) {
+      } else if (entry_key && kv->key_cmp_func(entry_key, key) == 0) {
         // We found our entry. Move to optimal entry if we have one
         if (optimal_index != index && optimal_entry.val != NULL) {
           long jump_size = labs((long)index - (long)optimal_index);
@@ -603,12 +646,12 @@ enum ckv_map_error ckv_map_set(ckv_map *kv, void *key, void *val) {
     // Atomic swap here and on failure, restart
     if (put_ckv_entry_atomic(kv, res.index, res.entry, replacement)) {
       if (!_ckv_val_empty(res.entry.val)) {
-        if (kv->val_remove_cb) {
-          kv->val_remove_cb(res.entry.val, kv->callback_user_data);
-        }
-        if (cb_key && kv->key_remove_cb) {
-          CKV_MAP_DEBUG("read modify write after original read, freeing key");
-          kv->key_remove_cb(cb_key, kv->callback_user_data);
+        // Retire old value for deferred freeing (other threads may still reference it)
+        _ckv_retire_item(kv, res.entry.val, false);
+        if (cb_key) {
+          // We allocated a new key but the key already existed, retire the duplicate
+          CKV_MAP_DEBUG("read modify write after original read, retiring key");
+          _ckv_retire_item(kv, cb_key, true);
         }
         //CKV_MAP_DEBUG("read modify write: %s", (char *)key);
       } else {
@@ -668,10 +711,11 @@ bool ckv_map_unset(ckv_map *kv, void *key) {
       if (put_ckv_entry_atomic(kv, res.index, res.entry, to_remove)) {
         // CKV_MAP_DEBUG("%lx: %s\n", (intptr_t)res.entry.val,
         // (char*)res.entry.val);
-        if (kv->key_remove_cb)
-          kv->key_remove_cb(res.entry.key, kv->callback_user_data);
-        if (kv->val_remove_cb)
-          kv->val_remove_cb(res.entry.val, kv->callback_user_data);
+        // Add to retired list for deferred freeing. We can't free immediately
+        // because other threads may still hold references (from iteration/search).
+        // Items will be freed when ckv_map_empty or ckv_map_free is called.
+        _ckv_retire_item(kv, res.entry.key, true);
+        _ckv_retire_item(kv, res.entry.val, false);
         atomic_fetch_sub(&(kv->count), 1);
         // If we wrote an empty entry, make sure the next entry is still empty
         if (to_remove.val == NULL) {
@@ -758,6 +802,10 @@ void ckv_map_print(ckv_map *kv, FILE *fp) {
 }
 
 void ckv_map_empty(ckv_map *kv) {
+  // First, drain retired items from unset operations
+  _ckv_drain_retired(kv);
+
+  // Then clear the table
   for (_ckv_index i = 0; i <= kv->mask; i++) {
     _ckv_entry p;
     do {
