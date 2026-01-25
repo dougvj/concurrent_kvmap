@@ -668,8 +668,8 @@ bool ckv_map_unset(ckv_map *kv, void *key) {
       if (put_ckv_entry_atomic(kv, res.index, res.entry, to_remove)) {
         // CKV_MAP_DEBUG("%lx: %s\n", (intptr_t)res.entry.val,
         // (char*)res.entry.val);
-        /*if (kv->key_remove_cb)
-          kv->key_remove_cb(res.entry.key, kv->callback_user_data);*/
+        if (kv->key_remove_cb)
+          kv->key_remove_cb(res.entry.key, kv->callback_user_data);
         if (kv->val_remove_cb)
           kv->val_remove_cb(res.entry.val, kv->callback_user_data);
         atomic_fetch_sub(&(kv->count), 1);
@@ -705,12 +705,28 @@ bool ckv_map_iterate(ckv_map *kv, ckv_map_iterate_callback callback, void *data)
   for (_ckv_index i = 0; i <= kv->mask; i++) {
     _ckv_entry kv_entry = get_ckv_entry(kv, i);
     if (!_ckv_val_empty(kv_entry.val)) {
-      if (!callback(kv_entry.key, kv_entry.val, data)) {
+      bool status = true;
+      void* val = kv_entry.val;
+      void* key = kv_entry.key;
+      if (kv->val_ref_cb) {
+        val = kv->val_ref_cb(kv_entry.val, kv->callback_user_data);
+      }
+      if (kv->key_ref_cb) {
+        key = kv->key_ref_cb(kv_entry.key, kv->callback_user_data);
+      }
+      status = callback(key, val, data);
+      if (kv->val_unref_cb) {
+        kv->val_unref_cb(val, kv->callback_user_data);
+      }
+      if (kv->key_unref_cb) {
+        kv->key_unref_cb(key, kv->callback_user_data);
+      }
+      if (!status) {
         return false;
       }
     }
   }
-  return true;
+  return true;;
 }
 
 void ckv_map_print(ckv_map *kv, FILE *fp) {
