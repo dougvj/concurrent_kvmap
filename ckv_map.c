@@ -213,6 +213,9 @@ ckv_map *ckv_map_create(ckv_map_create_params create_params) {
       return NULL;
     }
   }
+  if (size < CKV_MIN_SIZE) {
+    size = CKV_MIN_SIZE;
+  }
   ckv_map *kv = malloc(sizeof(ckv_map));
   if (kv) {
     kv->table = platform_region_alloc(size * sizeof(_ckv_int_ptr_entry));
@@ -270,7 +273,7 @@ static int _strcmp(void *a, void *b) { return strcmp(a, b); }
 
 ckv_map *ckv_map_str_create(uint_fast32_t size) {
   return ckv_map_create((ckv_map_create_params){
-      .size = CKV_MIN_SIZE,
+      .size = size,
       .key_insert_cb = _refcnt_strdup_wrap,
       .val_insert_cb = _refcnt_strdup_wrap,
       .key_remove_cb = _refcnt_unref_wrap,
