@@ -332,11 +332,12 @@ void dumptable(int signum) {
 void stress_test_kv(ckv_map *kv, bool single, int rounds) {
   test_println("generating random entries");
   char(*entries)[MAX_LEN];
-  entries = malloc(sizeof(char[MAX_LEN]) * NUM_ENTRIES);
+  entries = malloc(sizeof(*entries) * NUM_ENTRIES);
   assert(entries != NULL);
   char fname[256];
   sprintf(fname, "%u.txt", thread_id);
   FILE *f = fopen(fname, "w");
+  assert(f != NULL);
   for (unsigned i = 0; i < NUM_ENTRIES; i++) {
     gen_random_ascii(entries[i], MAX_LEN);
     fprintf(f, "%s\n", entries[i]);
