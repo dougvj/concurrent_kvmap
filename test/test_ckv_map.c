@@ -456,23 +456,21 @@ void *test_ckv_thread_start(void *args) {
 typedef struct {
   ckv_map *kv;
   const char *key;
+  atomic_bool stop;
 } kv_test_thread_continuous_args;
 
 void *test_ckv_continuous_read_thread(void *args) {
   kv_test_thread_continuous_args *a = (kv_test_thread_continuous_args *)args;
-  pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   pthread_setname_np(pthread_self(), "kv_continuous_read_thread");
   const char *last_val = NULL;
-  for (;;) {
+  while (!atomic_load(&a->stop)) {
     const char *val = ckv_map_get(a->kv, (void *)a->key);
     if (val) {
-      for (uint64_t i = 0; i < UINT64_MAX; i++) {
-        if (strcmp(val, "foo") != 0 && strcmp(val, "bar") != 0) {
-          test_println("bad value after %" PRIu64 " iteration(s): '%s'", i,
-                       val);
-          assert(false);
-        }
+      if (strcmp(val, "foo") != 0 && strcmp(val, "bar") != 0) {
+        test_println("bad value: '%s'", val);
+        assert(false);
       }
+      ckv_map_val_unref(a->kv, (void *)val);
     } else {
       if (last_val) {
         test_println("key disappeared after being set");
@@ -485,9 +483,8 @@ void *test_ckv_continuous_read_thread(void *args) {
 
 void *test_ckv_continuous_modify_thread(void *args) {
   kv_test_thread_continuous_args *a = (kv_test_thread_continuous_args *)args;
-  pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   pthread_setname_np(pthread_self(), "kv_continuous_modify_thread");
-  for (;;) {
+  while (!atomic_load(&a->stop)) {
     ckv_map_set(a->kv, (void *)a->key, "foo");
     ckv_map_set(a->kv, (void *)a->key, "bar");
   }
@@ -518,6 +515,7 @@ static void run_stress_tests(void) {
   kv_test_thread_continuous_args test_thread_continuous_args = {
       .kv = kv,
       .key = "dontcare!",
+      .stop = false,
   };
   pthread_t continuous_read_thread, continuous_modify_thread;
   pthread_create(&continuous_read_thread, NULL, test_ckv_continuous_read_thread,
@@ -528,8 +526,7 @@ static void run_stress_tests(void) {
   for (int i = 0; i < NUM_THREADS; i++) {
     pthread_join(threads[i], NULL);
   }
-  pthread_cancel(continuous_read_thread);
-  pthread_cancel(continuous_modify_thread);
+  atomic_store(&test_thread_continuous_args.stop, true);
   pthread_join(continuous_read_thread, NULL);
   pthread_join(continuous_modify_thread, NULL);
   ckv_map_free(kv);
