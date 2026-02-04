@@ -445,7 +445,7 @@ void *test_ckv_thread_start(void *args) {
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
   thread_id = cur_thread_num++;
   char *thread_name;
-  asprintf(&thread_name, "thread %i", thread_id);
+  (void)!asprintf(&thread_name, "thread %i", thread_id);
   pthread_setname_np(pthread_self(), thread_name);
   srand48_r(seed + thread_id * 12345678, &thread_seed);
   stress_test_kv(a->kv, false, a->rounds);
