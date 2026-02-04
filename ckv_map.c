@@ -542,7 +542,8 @@ static void maybe_unused _ckv_map_reindex(ckv_map *kv) {
 #include <unistd.h>
 
 static bool _ckv_map_inplace_expand(ckv_map *kv) {
-  if (__sync_bool_compare_and_swap(&(kv->is_resizing), false, true)) {
+  bool expected = false;
+  if (atomic_compare_exchange_strong(&(kv->is_resizing), &expected, true)) {
     _ckv_index old_len = (kv->mask + 1);
     _ckv_index new_len = old_len * 2;
     _ckv_index old_size = old_len * sizeof(_ckv_entry);
